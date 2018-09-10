@@ -1,0 +1,186 @@
+---
+title: "Fewer Democrats Registerd in North Carolina"
+author: "Matt DeVries"
+date: "9/9/2018"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Since the 2016 election, the number of Democratic voters shrank in North Carolina. The drop in Democratic registration is more apparent outside of cities and areas where African-Americans are a bigger part of the electorate.  Less North Carolinians are also registered as Republican, but the drop is not as precipitous as that faced by democrats.
+
+This Github repository is an analysis of voter registration in North Carolina.  The North Carolina State Board of Elections post regular reports on voter registration on their website at https://dl.ncsbe.gov/index.html?prefix=NVRA/NVRA%20Reports/
+
+In particular, this analysis examines changes in voter registration from December 2016 until August 2018.  During this time, the state saw a drop in voters registered as Democratic, and this analysis examines factors related to this drop.
+
+## Data
+This analysis looks at voter registration reports for the months of December 2016 and August 2018 that were downloaded from the NCSBE website.  Records were removed from the data that reported a number of features that I didn't examine. Party registrations for the Libertarian, Reform and Green parties were removed.  For demographics, this analysis only looks at the African-American population, so information about the race of other voters was discarded.
+
+```{r, message=F, warning=F, comment=F}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(knitr)
+
+nvra201808 <- read_csv("data/201808_NVRA_monthly_report.csv")
+nvra201612 <- read_csv("data/201612_NVRA_monthly_report.csv")
+
+
+nvra201808_wide<- nvra201808 %>% 
+        filter(category %in% c("COUNTY STATISTICAL", "Totals")) %>% 
+        filter(subject_head %in% c("party", "race","status")) %>% 
+        select(county_param, subject, subject_ct) %>% 
+        spread(subject, subject_ct) %>% 
+        select(-Active, -Green, -Inactive, -Libertarian, -Reform) %>% 
+        select(-`American Indian`, -Asian, -`Multi-Racial`, -Other, -Undesignated, -White) %>% 
+        rename(total18 = `Total Registration`, dem18 = Democrat, rep18 = Republican,
+               una18 = Unaffiliated, afam18 = Black)
+
+
+nvra201612_wide <- nvra201612 %>% 
+        filter(category %in% c("COUNTY STATISTICAL", "Totals")) %>% 
+        filter(subject_head %in% c("party", "race","status")) %>% 
+        select(county_param, subject, subject_ct) %>% 
+        spread(subject, subject_ct) %>% 
+        select(-Active, -Inactive, -Libertarian, -Reform) %>% 
+        select(-`American Indian`, -Asian, -`Multi-Racial`, -Other, -Undesignated, -White) %>% 
+        rename(total16 = `Total Registration`, dem16 = Democrat, rep16 = Republican,
+               una16 = Unaffiliated, afam16 = Black)
+```
+
+## Major Trends in Voter Registration
+
+Since the last major election in the state, there has been a drop in registered democratic voters in the state.  The table below looks at the change in registrations per party.
+
+```{r, message=F, warning=F, comment=F}
+sum16 <- nvra201612_wide %>%  
+        summarise(Democrats = sum(dem16), Republicans = sum(rep16),
+                  Unaffiliated = sum(una16), Total = sum(total16))
+
+sum18 <- nvra201808_wide %>% 
+        summarise(Democrats = sum(dem18), Republicans = sum(rep18),
+                  Unaffiliated = sum(una18), Total = sum(total18))
+
+
+sums_table <- rbind(sum16, sum18)
+
+sums_table[3,] <- sums_table[2,] -sums_table[1,]
+sums_table[4,] <- round(sums_table[3,] / sums_table[1,], 3) * 100
+
+rownames(sums_table) <- c("December 2016", "August 2018", "Difference", "Percentage Change")
+
+sums_table[1,] <- prettyNum(sums_table[1,], big.mark=",",scientific=FALSE)
+sums_table[2,] <- prettyNum(sums_table[2,], big.mark=",",scientific=FALSE)
+sums_table[3,] <- prettyNum(sums_table[3,], big.mark=",",scientific=FALSE)
+sums_table[4,] <- paste0(sums_table[4,], "%")
+
+kable(sums_table)
+
+
+```
+
+Overall, voter registration in the state grew by `r as.character(sums_table[4,4])`.  However, the number of Democratic voters changed by `r as.character(sums_table[4,1])`.  Meanwhile, the number of Republican voters saw a smaller change of `r as.character(sums_table[4,2])` in regsitered voters. The remainder of this analysis looks at changes in party affiliation at the county level in North Carolina.
+```{r, message=F, warning=F, comment=F}
+
+nvra_merge16 <- left_join(nvra201612_wide, nvra201808_wide, by="county_param")
+
+nvra_merge16 <- nvra_merge16 %>% 
+        mutate(
+                dem_change_prop = round((dem18 - dem16)/dem16, 2),
+                afam_prop = round(afam18/total18, 2)
+        )
+
+
+
+```
+
+## Map of Changes to Democratic Registration
+
+```{r, message=F, warning=F, comment=F, results="hide"}
+library(tigris)
+options(tigris_class = "sf")
+nc <- counties("NC", cb=T)
+nc$NAME <- toupper(nc$NAME)
+```
+
+
+```{r, message=F, warning=F, comment=F}
+charlotte <- c(35.229372, -80.847342)
+raleigh <- c(35.779432, -78.638249)
+greensboro <- c(36.070076,-79.789498)
+durham <- c(35.992797, -78.904842)
+winston <- c(36.098707, -80.245866)
+
+cities <- as.data.frame(rbind(charlotte, raleigh, greensboro, durham, winston))
+cities[,3] <- c("Charlotte", "Raleigh", "Greensboro", "Durham", "Winston-Salem")
+cities[,4] <- c("Mecklenburg","Wake","Guilford","Durham","Forsyth")
+cities <- rename(cities, lat=V1, lon=V2, city=V3, county=V4)
+
+nc_map16 <- left_join(nvra_merge16, nc, by = c("county_param"= "NAME"))
+
+library(ggrepel)
+
+ggplot(nc_map16) +
+        geom_sf(aes(fill=dem_change_prop), color="white") +
+        geom_point(data=cities, aes(x=lon, y=lat), color="deepskyblue2") +
+        theme_void() +
+        theme(panel.grid.major = element_line(colour = 'transparent')) +
+        labs(title="North Carolina Voter Registration",
+             subtitle="Change in Democratic Registration from 12/16-8/18",
+             caption="Source: North Carolina State Board of Elections") +
+        scale_fill_distiller(palette="Reds", name="Percentage Change") +
+        geom_text_repel(data=cities, aes(x=lon, y=lat, label=city))
+```
+
+The map above is a choropleth map of changes in democratic registration.  The five largest cities in North Carolina, Charlotte, Raleigh, Greensboro, Durham, Winston-Salem, are labeled and appear to conincide with smaller drops, or even increases, in democratic registration in their respective counties of Mecklenburg, Wake, Guilford, Durham and Foryth.  Outside of the areas around these cities, there also appears to be a trend where areas in the south and west are seeing larger drops in registration of democratic voters.
+
+
+## Mapping African-Americans and Population
+
+In order to map additional variables, I wanted to add on top of a choropleth, geographic points with variable size and color.  To generate approximate geographic points for the counties, I downloaded a zip codes table and averaged the latitude and longitude for the zip codes in each county
+
+```{r, message=F, warning=F, comment=F}
+counties <- read_csv("data/zip_codes_states.csv")
+
+nc_counties <- filter(counties, state=="NC")
+nc_counties <- filter(nc_counties, !is.na(latitude))
+nc_counties$county <- toupper(nc_counties$county)
+
+nc_counties_center <- nc_counties %>% 
+        group_by(county) %>% 
+        summarise(lat=mean(latitude), lon=mean(longitude))
+
+nc_map2 <- left_join(nvra_merge16, nc_counties_center, by=c("county_param"="county"))
+
+```
+
+The map below includes a display of the proportion of African-American voters, the number of voters, and the percentage change in democratic voters.
+
+```{r, message=F, warning=F, comment=F}
+
+nc_map2 <- rename(nc_map2, Voters = total18)
+
+options(scipen=999)
+ggplot() +
+        geom_sf(data=nc_map16, aes(fill=afam_prop), alpha =.5) +
+        geom_point(data=nc_map2, aes(x=lon, y=lat, size=Voters, color=dem_change_prop)) +
+        labs(title="North Carolina Voter Registration",
+             subtitle="Race and Change in Democratic Voter Registration from 12/16 to 8/18",
+             caption="Source: NC State Board of Elections") +
+        theme_void() +
+        theme(panel.grid.major = element_line(colour = 'transparent'),
+              legend.position = "bottom",
+              legend.box = "vertical") +
+        scale_color_gradient(high="deepskyblue2",  low="red",
+                             name="Change in Democratic Registration") +
+        scale_fill_distiller(palette = "Greens", direction = 1,
+                             name="Proportion of African-Americans") 
+
+```
+
+The further you travel west in North Carolina, you will find a smaller proportion of African-American voters.  The eastern part of the state includes the Black Belt, an area that has a higher proportion of African-American residents and voters.  Areas outside of the Black Belt and outside of the metropolitan areas appear to be losing democratic voters at a faster rate.
