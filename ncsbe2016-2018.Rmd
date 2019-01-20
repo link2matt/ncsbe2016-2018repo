@@ -163,6 +163,32 @@ The map above is a choropleth map of changes in democratic registration.  The fi
 
 
 ## Mapping African-Americans and Population
+Registration data indicated a correltion between the change in democratic registration and the proportion of African-Americans in a county.  Counties with a larger proportion of African-American voters saw smaller drops in democratic registration than less diverse counties.
+
+```{r, message=F, warning=F, comment=F}
+
+fit <- lm(dem_change_prop ~ afam_prop, data = nc_map16)
+
+cities2 <- c("MECKLENBURG", "WAKE", "GUILFORD", "DURHAM", "FORSYTH")
+nc_map16 <- rename(nc_map16, Voters = total18)
+
+ggplot(data=nc_map16) + 
+        geom_point(mapping = aes(x=afam_prop, y=dem_change_prop, 
+                                 size=Voters, color = dem_change_prop)) +
+        geom_abline(intercept = coef(fit)[1], slope = coef(fit)[2], col = "dark gray") +
+        labs(title="North Carolina Voter Registration by County",
+             subtitle="Race and Change in Democratic Registration from 12/16 to 8/18",
+             caption="Source: NC State Board of Elections",
+             x="Proportion of African-American Voters",
+             y="Change in Proportion of Democrats") +
+        scale_color_gradient(high="deepskyblue2",  low="red",
+                             name="Change in Democratic Registration") +
+        geom_point(data=nc_map16[nc_map16$county_param %in% cities2, ], aes(x=afam_prop, y=dem_change_prop),
+                  size = 1, color = "#332233") +
+        geom_text_repel(data=nc_map16[nc_map16$county_param %in% cities2, ], aes(x=afam_prop, y=dem_change_prop, label=county_param))
+
+
+```
 
 In order to map additional variables, I wanted to add on top of a choropleth, geographic points with variable size and color.  To generate approximate geographic points for the counties, I downloaded a zip codes table and averaged the latitude and longitude for the zip codes in each county
 
@@ -178,14 +204,17 @@ nc_counties_center <- nc_counties %>%
         summarise(lat=mean(latitude), lon=mean(longitude))
 
 nc_map2 <- left_join(nvra_merge16, nc_counties_center, by=c("county_param"="county"))
+nc_map2 <- rename(nc_map2, Voters = total18)
+
 
 ```
+
+
 
 The map below includes a display of the proportion of African-American voters, the number of voters, and the percentage change in democratic voters.
 
 ```{r, message=F, warning=F, comment=F}
 
-nc_map2 <- rename(nc_map2, Voters = total18)
 
 options(scipen=999)
 ggplot() +
